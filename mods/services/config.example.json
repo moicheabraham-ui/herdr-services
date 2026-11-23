@@ -1,0 +1,8 @@
+{
+  "machine": "",
+  "host": "",
+  "dashboardPort": 7500,
+  "devRoot": "Development",
+  "refreshSeconds": 10,
+  "demo": false
+}
