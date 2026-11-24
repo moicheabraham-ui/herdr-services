@@ -139,6 +139,7 @@ async function load(machine) {
 // ---- Icons: found on the service itself, once, and kept on disk. ----
 const CACHE = "data/service-icons";
 const RETRY_MS = 60 * 60 * 1000;
+const HUNT_STALE_MS = 3 * 60 * 1000;
 const TYPES = { "image/svg+xml": "svg", "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/x-icon": "ico", "image/vnd.microsoft.icon": "ico" };
 // The best format first: a vector or a large PNG beats a 16px .ico.
 const RANK = { svg: 0, png: 1, webp: 2, jpg: 3, ico: 4 };
@@ -253,7 +254,7 @@ function badge(t, item) {
 
 export default class ServicesButton extends View {
   init(_props, cx) {
-    Object.assign(this, { busy: false, detecting: false, hunting: false, terminal: null, project: null, loadedAt: 0, logos: new Map(), tried: new Map() });
+    Object.assign(this, { busy: false, detecting: false, hunting: false, huntedAt: 0, terminal: null, project: null, loadedAt: 0, logos: new Map(), tried: new Map() });
     this.seen = shared(KEY_REFRESH) ?? 0;
     if (checking()) return;
     cx.spawn(async (later) => {
@@ -306,7 +307,9 @@ export default class ServicesButton extends View {
 
   /** Looks, in the background and a few at a time, for the icons the services still lack. */
   hunt(cx, data) {
-    if (this.hunting || !data.ip || data.demo) return;
+    // A search that never finished (its task dropped or a request hung) must not block icons for
+    // good: after HUNT_STALE_MS a new one may start.
+    if ((this.hunting && Date.now() - this.huntedAt < HUNT_STALE_MS) || !data.ip || data.demo) return;
     const now = Date.now();
     const seen = new Set();
     const todo = data.items.filter((i) => {
@@ -317,7 +320,9 @@ export default class ServicesButton extends View {
     });
     if (!todo.length) return;
     this.hunting = true;
+    const run = (this.huntedAt = Date.now());
     cx.spawn(async (later) => {
+      try {
       for (let n = 0; n < todo.length; n += 4) {
         await Promise.all(todo.slice(n, n + 4).map(async (item) => {
           const key = iconKey(item);
@@ -328,7 +333,9 @@ export default class ServicesButton extends View {
         const current = shared(KEY_DATA);
         if (current) { this.withLogos(current); setShared(KEY_DATA, { ...current }); }
       }
-      this.hunting = false;
+      } finally {
+        if (this.huntedAt === run) this.hunting = false;
+      }
       later.notify();
     });
   }
